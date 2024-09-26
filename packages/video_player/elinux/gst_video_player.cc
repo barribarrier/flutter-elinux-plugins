@@ -41,12 +41,15 @@ void GstVideoPlayer::GstLibraryUnload() { gst_deinit(); }
 
 bool GstVideoPlayer::Init() {
   if (!gst_.pipeline) {
+    stream_handler_->OnNotifyError("InitializationError",
+                                   "Failed to create a pipeline");
     return false;
   }
 
   // Prerolls before getting information from the pipeline.
   if (!Preroll()) {
     DestroyPipeline();
+    stream_handler_->OnNotifyError("InitializationError", "Failed to preroll");
     return false;
   }
 
@@ -474,6 +477,13 @@ GstBusSyncReply GstVideoPlayer::HandleGstMessage(GstBus* bus,
       g_printerr("ERROR from element %s: %s\n", GST_OBJECT_NAME(message->src),
                  error->message);
       g_printerr("Error details: %s\n", debug);
+
+      auto* self = reinterpret_cast<GstVideoPlayer*>(user_data);
+      gchar* error_message = g_strdup_printf(
+          "%s: %s", GST_OBJECT_NAME(message->src), error->message);
+      self->stream_handler_->OnNotifyError("PlayerError", error_message, debug);
+
+      g_free(error_message);
       g_free(debug);
       g_error_free(error);
       break;

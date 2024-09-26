@@ -12,15 +12,19 @@
 class VideoPlayerStreamHandlerImpl : public VideoPlayerStreamHandler {
  public:
   using OnNotifyInitialized = std::function<void()>;
+  using OnNotifyError = std::function<void(
+      const std::string&, const std::string&, const std::string&)>;
   using OnNotifyFrameDecoded = std::function<void()>;
   using OnNotifyCompleted = std::function<void()>;
   using OnNotifyPlaying = std::function<void(bool)>;
 
   VideoPlayerStreamHandlerImpl(OnNotifyInitialized on_notify_initialized,
+                               OnNotifyError on_notify_error,
                                OnNotifyFrameDecoded on_notify_frame_decoded,
                                OnNotifyCompleted on_notify_completed,
                                OnNotifyPlaying on_notify_playing)
       : on_notify_initialized_(on_notify_initialized),
+        on_notify_error_(on_notify_error),
         on_notify_frame_decoded_(on_notify_frame_decoded),
         on_notify_completed_(on_notify_completed),
         on_notify_playing_(on_notify_playing) {}
@@ -36,6 +40,15 @@ class VideoPlayerStreamHandlerImpl : public VideoPlayerStreamHandler {
   void OnNotifyInitializedInternal() {
     if (on_notify_initialized_) {
       on_notify_initialized_();
+    }
+  }
+
+  // |VideoPlayerStreamHandler|
+  void OnNotifyErrorInternal(const std::string& code,
+                             const std::string& message,
+                             const std::string& details) {
+    if (on_notify_error_) {
+      on_notify_error_(code, message, details);
     }
   }
 
@@ -60,6 +73,7 @@ class VideoPlayerStreamHandlerImpl : public VideoPlayerStreamHandler {
   }
 
   OnNotifyInitialized on_notify_initialized_;
+  OnNotifyError on_notify_error_;
   OnNotifyFrameDecoded on_notify_frame_decoded_;
   OnNotifyCompleted on_notify_completed_;
   OnNotifyPlaying on_notify_playing_;

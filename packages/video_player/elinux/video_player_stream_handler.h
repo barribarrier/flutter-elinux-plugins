@@ -17,6 +17,14 @@ class VideoPlayerStreamHandler {
   // Notifies the completion of initializing the video player.
   void OnNotifyInitialized() { OnNotifyInitializedInternal(); }
 
+  // Notifies an error occurred during initializing the video player or an error
+  // occurred during playback.
+  void OnNotifyError(const std::string& code,
+                     const std::string& message = std::string(),
+                     const std::string& details = std::string()) {
+    OnNotifyErrorInternal(code, message, details);
+  }
+
   // Notifies the completion of decoding a video frame.
   void OnNotifyFrameDecoded() { OnNotifyFrameDecodedInternal(); }
 
@@ -28,6 +36,9 @@ class VideoPlayerStreamHandler {
 
  protected:
   virtual void OnNotifyInitializedInternal() = 0;
+  virtual void OnNotifyErrorInternal(const std::string& code,
+                                     const std::string& message,
+                                     const std::string& details) = 0;
   virtual void OnNotifyFrameDecodedInternal() = 0;
   virtual void OnNotifyCompletedInternal() = 0;
   virtual void OnNotifyPlayingInternal(bool is_playing) = 0;

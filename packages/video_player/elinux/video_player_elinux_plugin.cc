@@ -121,6 +121,9 @@ class VideoPlayerPlugin : public flutter::Plugin {
       flutter::MessageReply<flutter::EncodableValue> reply);
 
   void SendInitializedEventMessage(int64_t texture_id);
+  void SendErrorEventMessage(int64_t texture_id, const std::string& code,
+                             const std::string& message,
+                             const std::string& details);
   void SendPlayCompletedEventMessage(int64_t texture_id);
   void SendIsPlayingStateUpdate(int64_t texture_id, bool is_playing);
 
@@ -307,9 +310,6 @@ void VideoPlayerPlugin::HandleCreateMethodCall(
           [instance = instance.get()](
               size_t width, size_t height, void* egl_display,
               void* egl_context) -> const FlutterDesktopEGLImage* {
-            if (!instance->player) {
-              return nullptr;
-            }
             instance->egl_image->width = instance->player->GetWidth();
             instance->egl_image->height = instance->player->GetHeight();
             instance->egl_image->egl_image =
@@ -342,14 +342,14 @@ void VideoPlayerPlugin::HandleCreateMethodCall(
             &flutter::StandardMethodCodec::GetInstance());
     auto event_channel_handler = std::make_unique<
         flutter::StreamHandlerFunctions<flutter::EncodableValue>>(
-        [instance = instance.get(), host = this](
+        [instance = instance.get()](
             const flutter::EncodableValue* arguments,
             std::unique_ptr<flutter::EventSink<flutter::EncodableValue>>&&
                 events)
             -> std::unique_ptr<
                 flutter::StreamHandlerError<flutter::EncodableValue>> {
           instance->event_sink = std::move(events);
-          host->SendInitializedEventMessage(instance->texture_id);
+          instance->player->Init();
           return nullptr;
         },
         [instance = instance.get()](const flutter::EncodableValue* arguments)
@@ -366,6 +366,12 @@ void VideoPlayerPlugin::HandleCreateMethodCall(
         // OnNotifyInitialized
         [texture_id, host = this]() {
           host->SendInitializedEventMessage(texture_id);
+        },
+        // OnNotifyError
+        [texture_id, host = this](const std::string& code,
+                                  const std::string& message,
+                                  const std::string& details) {
+          host->SendErrorEventMessage(texture_id, code, message, details);
         },
         // OnNotifyFrameDecoded
         [texture_id, host = this]() {
@@ -385,18 +391,9 @@ void VideoPlayerPlugin::HandleCreateMethodCall(
 
   flutter::EncodableMap value;
   TextureMessage result;
-
-  bool ok = players_[texture_id]->player->Init();
-  if (ok) {
-    result.SetTextureId(texture_id);
-    value.emplace(flutter::EncodableValue(kEncodableMapkeyResult),
-                  result.ToMap());
-  } else {
-    auto error_message = "Failed to initialize the player with texture id: " +
-                         std::to_string(texture_id);
-    value.emplace(flutter::EncodableValue(kEncodableMapkeyError),
-                  flutter::EncodableValue(WrapError(error_message)));
-  }
+  result.SetTextureId(texture_id);
+  value.emplace(flutter::EncodableValue(kEncodableMapkeyResult),
+                result.ToMap());
   reply(flutter::EncodableValue(value));
 }
 
@@ -599,6 +596,19 @@ void VideoPlayerPlugin::SendInitializedEventMessage(int64_t texture_id) {
       {flutter::EncodableValue("height"), flutter::EncodableValue(height)}};
   flutter::EncodableValue event(encodables);
   players_[texture_id]->event_sink->Success(event);
+}
+
+void VideoPlayerPlugin::SendErrorEventMessage(int64_t texture_id,
+                                              const std::string& code,
+                                              const std::string& message,
+                                              const std::string& details) {
+  if (players_.find(texture_id) == players_.end() ||
+      !players_[texture_id]->event_sink) {
+    return;
+  }
+
+  players_[texture_id]->event_sink->Error(code, message,
+                                          flutter::EncodableValue(details));
 }
 
 void VideoPlayerPlugin::SendPlayCompletedEventMessage(int64_t texture_id) {
