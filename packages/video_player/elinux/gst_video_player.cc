@@ -25,7 +25,7 @@ GstVideoPlayer::GstVideoPlayer(
   }
 }
 
-GstVideoPlayer::~GstVideoPlayer() {
+void GstVideoPlayer::Dispose() {
 #ifdef USE_EGL_IMAGE_DMABUF
   UnrefEGLImage();
 #endif  // USE_EGL_IMAGE_DMABUF
@@ -51,8 +51,11 @@ bool GstVideoPlayer::Init() {
   }
 
   // Sets internal video size and buffier.
-  GetVideoSize(width_, height_);
-  pixels_.reset(new uint32_t[width_ * height_]);
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex_buffer_);
+    GetVideoSize(width_, height_);
+    pixels_.reset(new uint32_t[width_ * height_]);
+  }
 
   stream_handler_->OnNotifyInitialized();
 
@@ -181,11 +184,12 @@ void* GstVideoPlayer::GetEGLImage(void* egl_display, void* egl_context) {
     UnrefEGLImage();
 
     gint fd = gst_dmabuf_memory_get_fd(memory);
-    gst_gl_display_egl_ =
-        gst_gl_display_egl_new_with_egl_display(reinterpret_cast<gpointer>(egl_display));
-    gst_gl_ctx_ = gst_gl_context_new_wrapped(
-        GST_GL_DISPLAY_CAST(gst_gl_display_egl_), reinterpret_cast<guintptr>(egl_context),
-        GST_GL_PLATFORM_EGL, GST_GL_API_GLES2);
+    gst_gl_display_egl_ = gst_gl_display_egl_new_with_egl_display(
+        reinterpret_cast<gpointer>(egl_display));
+    gst_gl_ctx_ =
+        gst_gl_context_new_wrapped(GST_GL_DISPLAY_CAST(gst_gl_display_egl_),
+                                   reinterpret_cast<guintptr>(egl_context),
+                                   GST_GL_PLATFORM_EGL, GST_GL_API_GLES2);
 
     gst_gl_context_activate(gst_gl_ctx_, TRUE);
 
@@ -197,6 +201,7 @@ void* GstVideoPlayer::GetEGLImage(void* egl_display, void* egl_context) {
 }
 
 void GstVideoPlayer::UnrefEGLImage() {
+  std::shared_lock<std::shared_mutex> lock(mutex_buffer_);
   if (gst_egl_image_) {
     gst_egl_image_unref(gst_egl_image_);
     gst_object_unref(gst_gl_ctx_);
@@ -217,6 +222,16 @@ const uint8_t* GstVideoPlayer::GetFrameBuffer() {
   const uint32_t pixel_bytes = width_ * height_ * 4;
   gst_buffer_extract(gst_.buffer, 0, pixels_.get(), pixel_bytes);
   return reinterpret_cast<const uint8_t*>(pixels_.get());
+}
+
+const int32_t GstVideoPlayer::GetWidth() {
+  std::shared_lock<std::shared_mutex> lock(mutex_buffer_);
+  return width_;
+}
+
+const int32_t GstVideoPlayer::GetHeight() {
+  std::shared_lock<std::shared_mutex> lock(mutex_buffer_);
+  return height_;
 }
 
 // Creats a video pipeline using playbin.
@@ -320,9 +335,12 @@ void GstVideoPlayer::DestroyPipeline() {
     gst_element_set_state(gst_.pipeline, GST_STATE_NULL);
   }
 
-  if (gst_.buffer) {
-    gst_buffer_unref(gst_.buffer);
-    gst_.buffer = nullptr;
+  {
+    std::lock_guard<std::shared_mutex> lock(mutex_buffer_);
+    if (gst_.buffer) {
+      gst_buffer_unref(gst_.buffer);
+      gst_.buffer = nullptr;
+    }
   }
 
   if (gst_.bus) {
@@ -425,20 +443,24 @@ void GstVideoPlayer::HandoffHandler(GstElement* fakesink, GstBuffer* buf,
   gst_structure_get_int(structure, "width", &width);
   gst_structure_get_int(structure, "height", &height);
   gst_caps_unref(caps);
-  if (width != self->width_ || height != self->height_) {
-    self->width_ = width;
-    self->height_ = height;
-    self->pixels_.reset(new uint32_t[width * height]);
-    std::cout << "Pixel buffer size: width = " << width
-              << ", height = " << height << std::endl;
+
+  {
+    std::lock_guard<std::shared_mutex> lock(self->mutex_buffer_);
+    if (width != self->width_ || height != self->height_) {
+      self->width_ = width;
+      self->height_ = height;
+      self->pixels_.reset(new uint32_t[width * height]);
+      std::cout << "Pixel buffer size: width = " << width
+                << ", height = " << height << std::endl;
+    }
+
+    if (self->gst_.buffer) {
+      gst_buffer_unref(self->gst_.buffer);
+      self->gst_.buffer = nullptr;
+    }
+    self->gst_.buffer = gst_buffer_ref(buf);
   }
 
-  std::lock_guard<std::shared_mutex> lock(self->mutex_buffer_);
-  if (self->gst_.buffer) {
-    gst_buffer_unref(self->gst_.buffer);
-    self->gst_.buffer = nullptr;
-  }
-  self->gst_.buffer = gst_buffer_ref(buf);
   self->stream_handler_->OnNotifyFrameDecoded();
 }
 

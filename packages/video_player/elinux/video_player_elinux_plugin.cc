@@ -134,7 +134,7 @@ class VideoPlayerPlugin : public flutter::Plugin {
 
   flutter::PluginRegistrar* plugin_registrar_;
   flutter::TextureRegistrar* texture_registrar_;
-  std::unordered_map<int64_t, std::unique_ptr<FlutterVideoPlayer>> players_;
+  std::unordered_map<int64_t, std::shared_ptr<FlutterVideoPlayer>> players_;
 };
 
 // static
@@ -299,7 +299,7 @@ void VideoPlayerPlugin::HandleCreateMethodCall(
     uri = meta.GetUri();
   }
 
-  auto instance = std::make_unique<FlutterVideoPlayer>();
+  auto instance = std::make_shared<FlutterVideoPlayer>();
 #ifdef USE_EGL_IMAGE_DMABUF
   instance->egl_image = std::make_unique<FlutterDesktopEGLImage>();
   instance->texture =
@@ -307,9 +307,6 @@ void VideoPlayerPlugin::HandleCreateMethodCall(
           [instance = instance.get()](
               size_t width, size_t height, void* egl_display,
               void* egl_context) -> const FlutterDesktopEGLImage* {
-            if (!instance->player) {
-              return nullptr;
-            }
             instance->egl_image->width = instance->player->GetWidth();
             instance->egl_image->height = instance->player->GetHeight();
             instance->egl_image->egl_image =
@@ -322,9 +319,6 @@ void VideoPlayerPlugin::HandleCreateMethodCall(
       std::make_unique<flutter::TextureVariant>(flutter::PixelBufferTexture(
           [instance = instance.get()](
               size_t width, size_t height) -> const FlutterDesktopPixelBuffer* {
-            if (!instance->player) {
-              return nullptr;
-            }
             instance->buffer->width = instance->player->GetWidth();
             instance->buffer->height = instance->player->GetHeight();
             instance->buffer->buffer = instance->player->GetFrameBuffer();
@@ -631,15 +625,13 @@ void VideoPlayerPlugin::SendIsPlayingStateUpdate(int64_t texture_id,
 
 void VideoPlayerPlugin::DisposePlayer(int64_t texture_id) {
   if (players_.find(texture_id) != players_.end()) {
-    texture_registrar_->UnregisterTexture(texture_id);
-    auto* player = players_[texture_id].get();
+    auto player = players_[texture_id];
     player->event_sink = nullptr;
     if (player->event_channel) {
       player->event_channel->SetStreamHandler(nullptr);
     }
-    player->player = nullptr;
-    player->buffer = nullptr;
-    player->texture = nullptr;
+    player->player->Dispose();
+    texture_registrar_->UnregisterTexture(texture_id, [player]() {});
   }
 }
 

@@ -24,12 +24,12 @@ class GstVideoPlayer {
  public:
   GstVideoPlayer(const std::string& uri,
                  std::unique_ptr<VideoPlayerStreamHandler> handler);
-  ~GstVideoPlayer();
 
   static void GstLibraryLoad();
   static void GstLibraryUnload();
 
   bool Init();
+  void Dispose();
   bool Play();
   bool Pause();
   bool Stop();
@@ -43,8 +43,8 @@ class GstVideoPlayer {
 #ifdef USE_EGL_IMAGE_DMABUF
   void* GetEGLImage(void* egl_display, void* egl_context);
 #endif  // USE_EGL_IMAGE_DMABUF
-  int32_t GetWidth() const { return width_; };
-  int32_t GetHeight() const { return height_; };
+  const int32_t GetWidth();
+  const int32_t GetHeight();
 
  private:
   struct GstVideoElements {
